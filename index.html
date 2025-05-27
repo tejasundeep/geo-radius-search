@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GEO Radius Search</title>
+<style>
+  body{font-family:system-ui,Arial,sans-serif;max-width:420px;margin:2em auto;line-height:1.5}
+  label,button{display:block;width:100%;margin-top:1em}
+  input{width:100%;padding:.5em;box-sizing:border-box}
+  #result{margin-top:1.5em;font-weight:bold}
+  ul{padding-left:1.2em;margin:0} li{margin:.4em 0}
+</style>
+</head>
+<body>
+<h1>Check Vendor Proximity</h1>
+
+<label for="place">Enter your place:</label>
+<input id="place" placeholder="Ameerpet, Hyderabad">
+<button id="checkBtn">Check Distance</button>
+<div id="result"></div>
+
+<!-- ✅ Best-practice Maps loader -->
+<script async
+  src="https://maps.googleapis.com/maps/api/js?key=API_KEY&loading=async&libraries=places&callback=init&v=weekly">
+</script>
+
+<script>
+(() => { 'use strict';
+
+  /* ---------- 0. Config ---------- */
+  const CFG = {
+    vendors: [
+      { name:'Vendor A (Madhapur)', lat:17.4456, lng:78.3919 },
+      { name:'Vendor B (Hitech City)', lat:17.4474, lng:78.3762 },
+      { name:'Vendor C (Warangal)',  lat:17.9784, lng:79.5941 }
+    ],
+    thresholdKm : 50,
+    travelMode  : 'DRIVING',
+    unitSystem  : 'METRIC'
+  };
+
+  /* ---------- 1. Services ---------- */
+  class MapService {
+    constructor(gmaps) {
+      this.geocoder = new gmaps.Geocoder();
+      this.matrix   = new gmaps.DistanceMatrixService();
+      this.gmaps    = gmaps;
+    }
+    geocode(address) {
+      return new Promise((res, rej) =>
+        this.geocoder.geocode({ address }, (r,s) =>
+          s==='OK' ? res(r[0].geometry.location) : rej(Error(`Geocode: ${s}`))
+        )
+      );
+    }
+    distances(origin, vendors) {
+      return new Promise((res, rej) =>
+        this.matrix.getDistanceMatrix({
+          origins      : [origin],
+          destinations : vendors.map(v => new this.gmaps.LatLng(v.lat, v.lng)),
+          travelMode   : this.gmaps.TravelMode[CFG.travelMode],
+          unitSystem   : this.gmaps.UnitSystem[CFG.unitSystem]
+        }, (r,s) => s==='OK' ? res(r.rows[0].elements) : rej(Error(`Matrix: ${s}`)))
+      );
+    }
+  }
+
+  class Renderer {
+    constructor(el){ this.el = el; }
+    error(msg){ this.el.style.color='red';   this.el.textContent = msg; }
+    list(items){
+      this.el.style.color='#000';
+      this.el.innerHTML = `<ul>${items.map(i=>i.html).join('')}</ul>`;
+    }
+  }
+
+  /* ---------- 2. App ---------- */
+  class App {
+    constructor(gmaps){
+      this.svc  = new MapService(gmaps);
+      this.ui   = new Renderer(document.getElementById('result'));
+      document.getElementById('checkBtn').onclick = () => this.check();
+    }
+    async check(){
+      const place = document.getElementById('place').value.trim();
+      if(!place) return this.ui.error('⚠️ Enter a place name.');
+      try {
+        const origin = await this.svc.geocode(place);
+        const elems  = await this.svc.distances(origin, CFG.vendors);
+        const list   = CFG.vendors.map((v,i)=>({
+          km   : elems[i].distance.value/1000,
+          text : elems[i].distance.text,
+          name : v.name
+        })).sort((a,b)=>a.km-b.km);
+        this.ui.list(list.map(d=>{
+          const near  = d.km <= CFG.thresholdKm;
+          const icon  = near?'✅':'❌';
+          const color = near?'green':'gray';
+          return {
+            html:`<li style="color:${color}">${icon} ${d.name} – ${d.text}</li>`
+          };
+        }));
+      } catch(err){ this.ui.error(err.message); }
+    }
+  }
+
+  /* ---------- 3. Bootstrap ---------- */
+  window.init = () => new App(window.google.maps);
+})();
+</script>
+</body>
+</html>
